@@ -91,7 +91,8 @@
       "request": "launch",
       "program": "nerfstudio/scripts/train.py",
       "console": "integratedTerminal",
-      "args": ["semantic_nerf"]
+      "justMyCode": false,
+      "args": ["semantic-nerfw", "--vis", "viewer+tensorboard"]
     },
     {
       "name": "Python: NeuS on Replica",
