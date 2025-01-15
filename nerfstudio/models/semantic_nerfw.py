@@ -55,7 +55,7 @@ class SemanticNerfWModelConfig(NerfactoModelConfig):
     use_transient_embedding: bool = False
     """Whether to use transient embedding."""
     semantic_loss_weight: float = 1.0
-    pass_semantic_gradients: bool = False
+    pass_semantic_gradients: bool = True
 
 
 class SemanticNerfWModel(Model):
@@ -174,7 +174,14 @@ class SemanticNerfWModel(Model):
         return callbacks
 
     def get_outputs(self, ray_bundle: RayBundle):
+        # ray_samples [4096, 48]
+        # weights_list [tensor([4096,256,1]), tensor([4096,256,1])]
+        # ray_samples_list [tensor([4096,256]), tensor([4096,256])]
         ray_samples, weights_list, ray_samples_list = self.proposal_sampler(ray_bundle, density_fns=self.density_fns)
+        # field_outputs:
+        #  FieldHeadNames.SEMANTICS: [4096, 48, 144]
+        #  FieldHeadNames.RGB: [4096, 48, 3]
+        #  FieldHeadNames.DENSITY: [4096, 48, 1]
         field_outputs = self.field(ray_samples)
 
         if self.training and self.config.use_transient_embedding:
@@ -210,7 +217,7 @@ class SemanticNerfWModel(Model):
             outputs["uncertainty"] = uncertainty + 0.03  # NOTE(ethan): this is the uncertainty min
             outputs["density_transient"] = field_outputs[FieldHeadNames.TRANSIENT_DENSITY]
 
-        # semantics
+        # semantics outpus[semantics]: [4096, 144]
         semantic_weights = weights_static
         if not self.config.pass_semantic_gradients:
             semantic_weights = semantic_weights.detach()
@@ -218,7 +225,7 @@ class SemanticNerfWModel(Model):
             field_outputs[FieldHeadNames.SEMANTICS], weights=semantic_weights
         )
 
-        # semantics colormaps
+        # semantics colormaps outputs[semantics_colormap]: [4096, 3]
         semantic_labels = torch.argmax(torch.nn.functional.softmax(outputs["semantics"], dim=-1), dim=-1)
         outputs["semantics_colormap"] = self.colormap.to(self.device)[semantic_labels]
 

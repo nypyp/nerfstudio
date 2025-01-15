@@ -188,3 +188,27 @@ camera_paths/
 */**/.DS_Store
 */**/._.DS_Store
 
+camerasmod.py
+checkbbox.py
+color_lable.json
+color.py
+fakedata.py
+fakedata2.py
+index.html
+jpg2pngCamjsn.py
+labelstatics.py
+modifylable.py
+png2jpg.py
+rename.py
+replica_colmap.tar.gz
+scaleImg.py
+trans2cam.py
+.vscode/launch.json
+colmap/database.db
+colmap/sparse/0/cameras.bin
+colmap/sparse/0/images.bin
+colmap/sparse/0/points3D.bin
+colmap/sparse/0/project.ini
+nerfstudio/data/dataparsers/sitcoms3d_dataparser.py
+.vscode/launch.json
+nerfstudio/data/dataparsers/sitcoms3d_dataparser.py

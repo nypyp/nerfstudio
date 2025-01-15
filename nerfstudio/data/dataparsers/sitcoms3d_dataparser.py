@@ -38,12 +38,12 @@ class Sitcoms3DDataParserConfig(DataParserConfig):
 
     _target: Type = field(default_factory=lambda: Sitcoms3D)
     """target class to instantiate"""
-    data: Path = Path("data/sitcoms3d/TBBT-big_living_room")
+    data: Path = Path("data/replica_colmap/room_1")
     """Directory specifying location of data."""
     include_semantics: bool = True
     """whether or not to include loading of semantics data"""
-    downscale_factor: int = 4
-    scene_scale: float = 2.0
+    downscale_factor: int = 1
+    scene_scale: float = 1.0
     """
     Sets the bounding cube to have edge length of this size.
     The longest dimension of the Sitcoms3D axis-aligned bbox will be scaled to this value.
@@ -123,7 +123,7 @@ class Sitcoms3D(DataParser):
             panoptic_classes = load_from_json(self.config.data / "panoptic_classes.json")
             classes = panoptic_classes["thing"]
             colors = torch.tensor(panoptic_classes["thing_colors"], dtype=torch.float32) / 255.0
-            semantics = Semantics(filenames=filenames, classes=classes, colors=colors, mask_classes=["person"])
+            semantics = Semantics(filenames=filenames, classes=classes, colors=colors)
 
         assert torch.all(cx[0] == cx), "Not all cameras have the same cx. Our Cameras class does not support this."
         assert torch.all(cy[0] == cy), "Not all cameras have the same cy. Our Cameras class does not support this."
@@ -133,6 +133,8 @@ class Sitcoms3D(DataParser):
             fy=fy,
             cx=float(cx[0]),
             cy=float(cy[0]),
+            height=480,
+            width=640,
             camera_to_worlds=camera_to_worlds,
             camera_type=CameraType.PERSPECTIVE,
         )
