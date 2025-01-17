@@ -92,7 +92,13 @@
       "program": "nerfstudio/scripts/train.py",
       "console": "integratedTerminal",
       "justMyCode": false,
-      "args": ["semantic-nerfw", "--vis", "viewer+tensorboard"]
+      "args": [
+        "semantic-nerfw",
+        "--vis",
+        "viewer+tensorboard",
+        "--data",
+        "data/replica_colmap/room_1"
+      ]
     },
     {
       "name": "Python: NeuS on Replica",

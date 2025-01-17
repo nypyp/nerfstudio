@@ -213,3 +213,4 @@ nerfstudio/data/dataparsers/sitcoms3d_dataparser.py
 .vscode/launch.json
 nerfstudio/data/dataparsers/sitcoms3d_dataparser.py
 .vscode/launch.json
+sampleFromReplica.py
