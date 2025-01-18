@@ -59,6 +59,7 @@ from nerfstudio.models.neus import NeuSModelConfig
 from nerfstudio.models.neus_facto import NeuSFactoModelConfig
 from nerfstudio.models.semantic_nerfw import SemanticNerfWModelConfig
 from nerfstudio.models.semantic_nerf import SemanticNerfModelConfig
+from nerfstudio.models.my_semantic_nerf import MySemanticNerfModelConfig
 from nerfstudio.models.splatfacto import SplatfactoModelConfig
 from nerfstudio.models.tensorf import TensoRFModelConfig
 from nerfstudio.models.vanilla_nerf import NeRFModel, VanillaModelConfig
@@ -353,9 +354,7 @@ method_configs["semantic-nerfw"] = TrainerConfig(
 
 method_configs["vanilla-nerf"] = TrainerConfig(
     method_name="vanilla-nerf",
-    steps_per_eval_batch=5000,
-    steps_per_save=20000,
-    max_num_iterations=100000,
+    max_num_iterations=300000,
     pipeline=VanillaPipelineConfig(
         datamanager=VanillaDataManagerConfig(
             _target=VanillaDataManager[SemanticDataset],
