@@ -46,7 +46,7 @@ class SemanticNerfModelConfig(ModelConfig):
     background_color: Literal["random", "last_sample", "black", "white"] = "white"
     """Whether to randomize the background color."""
     
-    semantic_loss_weight: float = 0.04
+    semantic_loss_weight: float = 0.004
 
 
 class SemanticNerfModel(Model):

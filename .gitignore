@@ -214,3 +214,7 @@ nerfstudio/data/dataparsers/sitcoms3d_dataparser.py
 nerfstudio/data/dataparsers/sitcoms3d_dataparser.py
 .vscode/launch.json
 sampleFromReplica.py
+createCamerasjson.py
+printSort.py
+rename_images.py
+trans2cam_new.py

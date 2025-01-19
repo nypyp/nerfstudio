@@ -39,7 +39,7 @@ class MySemanticNerfModelConfig(NerfactoModelConfig):
     """Whether to use appearance embedding"""
     use_average_appearance_embedding: bool = False
     """Whether to use average appearance embedding"""
-    use_semantics: bool = False
+    use_semantics: bool = True
     """Whether to use semantics"""
     predict_normals: bool = False
     """Whether to use normal prediction"""
@@ -218,7 +218,8 @@ class MySemanticNerfModel(Model):
         )
         assert metrics_dict is not None and "distortion" in metrics_dict
         loss_dict["distortion_loss"] = self.config.distortion_loss_mult * metrics_dict["distortion"]
-        
+        loss_dict["rgb_loss"] = self.rgb_loss(image, outputs["rgb"])
+
         # semantic loss
         if self.config.use_semantics:
             loss_dict["semantics_loss"] = self.config.semantic_loss_weight * self.cross_entropy_loss(
@@ -236,6 +237,10 @@ class MySemanticNerfModel(Model):
             pred_accumulation=outputs["accumulation"],
             gt_image=image,
         )
+        
+        #if torch.isnan(rgb).any():
+        #    print("Warning: NaN values found in rgb tensor. Clamping to [0, 1] range.")
+        #     rgb = torch.nan_to_num(rgb, nan=0.0)
         
         rgb = torch.clamp(rgb, min=0, max=1)
         acc = colormaps.apply_colormap(outputs["accumulation"])
