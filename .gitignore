@@ -218,3 +218,8 @@ createCamerasjson.py
 printSort.py
 rename_images.py
 trans2cam_new.py
+# pixi environments
+.pixi
+/third_party
+
+mapper
