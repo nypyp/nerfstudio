@@ -258,12 +258,11 @@ class VanillaPipeline(Pipeline):
         seed_pts = None
         if (
             hasattr(self.datamanager, "train_dataparser_outputs")
-            and "points3D_xyz" in self.datamanager.train_dataparser_outputs.metadata
+            and "points3D_xyz" in self.datamanager.train_dataparser_outputs.metadata  # type: ignore
         ):
-            pts = self.datamanager.train_dataparser_outputs.metadata["points3D_xyz"]
-            pts_rgb = self.datamanager.train_dataparser_outputs.metadata["points3D_rgb"]
+            pts = self.datamanager.train_dataparser_outputs.metadata["points3D_xyz"]  # type: ignore
+            pts_rgb = self.datamanager.train_dataparser_outputs.metadata["points3D_rgb"]  # type: ignore
             seed_pts = (pts, pts_rgb)
-        self.datamanager.to(device)
         # TODO(ethan): get rid of scene_bounds from the model
         assert self.datamanager.train_dataset is not None, "Missing input dataset"
 
@@ -422,12 +421,16 @@ class VanillaPipeline(Pipeline):
         self, step: Optional[int] = None, output_path: Optional[Path] = None, get_std: bool = False
     ):
         """Get the average metrics for evaluation images."""
-        assert hasattr(
-            self.datamanager, "fixed_indices_eval_dataloader"
-        ), "datamanager must have 'fixed_indices_eval_dataloader' attribute"
+        assert hasattr(self.datamanager, "fixed_indices_eval_dataloader"), (
+            "datamanager must have 'fixed_indices_eval_dataloader' attribute"
+        )
         image_prefix = "eval"
         return self.get_average_image_metrics(
-            self.datamanager.fixed_indices_eval_dataloader, image_prefix, step, output_path, get_std
+            self.datamanager.fixed_indices_eval_dataloader,  # type: ignore
+            image_prefix,
+            step,
+            output_path,
+            get_std,
         )
 
     def load_pipeline(self, loaded_state: Dict[str, Any], step: int) -> None:

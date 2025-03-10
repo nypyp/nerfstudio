@@ -106,7 +106,7 @@ class PixelSampler:
         num_valid = 0
         for _ in range(self.config.max_num_iterations):
             c, y, x = (i.flatten() for i in torch.split(indices, 1, dim=-1))
-            chosen_indices_validity = mask.squeeze()[c, y, x].bool()
+            chosen_indices_validity = mask.squeeze(-1)[c, y, x].bool()
             num_valid = int(torch.sum(chosen_indices_validity).item())
             if num_valid == num_samples:
                 break
@@ -556,9 +556,9 @@ class PairPixelSampler(PixelSampler):  # pylint: disable=too-few-public-methods
     ) -> Int[Tensor, "batch_size 3"]:
         rays_to_sample = self.rays_to_sample
         if batch_size is not None:
-            assert (
-                int(batch_size) % 2 == 0
-            ), f"PairPixelSampler can only return batch sizes in multiples of two (got {batch_size})"
+            assert int(batch_size) % 2 == 0, (
+                f"PairPixelSampler can only return batch sizes in multiples of two (got {batch_size})"
+            )
             rays_to_sample = batch_size // 2
 
         if isinstance(mask, Tensor) and not self.config.ignore_mask:
