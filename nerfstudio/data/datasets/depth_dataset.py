@@ -96,9 +96,9 @@ class DepthDataset(InputDataset):
                 self.depths = torch.stack(depth_tensors)
                 np.save(cache, self.depths.cpu().numpy())
             dataparser_outputs.metadata["depth_filenames"] = None
-            dataparser_outputs.metadata["depth_unit_scale_factor"] = 1.0
+            dataparser_outputs.metadata["depth_unit_scale_factor"] = 0.001
             self.metadata["depth_filenames"] = None
-            self.metadata["depth_unit_scale_factor"] = 1.0
+            self.metadata["depth_unit_scale_factor"] = 0.001
 
         self.depth_filenames = self.metadata["depth_filenames"]
         self.depth_unit_scale_factor = self.metadata["depth_unit_scale_factor"]

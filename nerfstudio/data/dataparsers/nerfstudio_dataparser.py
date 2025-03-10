@@ -25,7 +25,7 @@ from PIL import Image
 
 from nerfstudio.cameras import camera_utils
 from nerfstudio.cameras.cameras import CAMERA_MODEL_TO_TYPE, Cameras, CameraType
-from nerfstudio.data.dataparsers.base_dataparser import DataParser, DataParserConfig, DataparserOutputs
+from nerfstudio.data.dataparsers.base_dataparser import DataParser, DataParserConfig, DataparserOutputs, Semantics
 from nerfstudio.data.scene_box import SceneBox
 from nerfstudio.data.utils.dataparsers_utils import (
     get_train_eval_split_all,
@@ -77,6 +77,8 @@ class NerfstudioDataParserConfig(DataParserConfig):
     """Replace the unknown pixels with this color. Relevant if you have a mask but still sample everywhere."""
     load_3D_points: bool = False
     """Whether to load the 3D points from the colmap reconstruction."""
+    include_semantics: bool = True
+    """whether or not to include loading of semantics data"""
 
 
 @dataclass
@@ -99,6 +101,7 @@ class Nerfstudio(DataParser):
         image_filenames = []
         mask_filenames = []
         depth_filenames = []
+        semantic_filenames = []  # 新增语义文件列表
         poses = []
 
         fx_fixed = "fl_x" in meta
@@ -182,6 +185,15 @@ class Nerfstudio(DataParser):
                 depth_fname = self._get_fname(depth_filepath, data_dir, downsample_folder_prefix="depths_")
                 depth_filenames.append(depth_fname)
 
+            if "semantic_path" in frame:
+                semantic_filepath = Path(frame["semantic_path"])
+                semantic_fname = self._get_fname(
+                    semantic_filepath,
+                    data_dir,
+                    downsample_folder_prefix="semantics_",
+                )
+                semantic_filenames.append(semantic_fname)
+
         assert len(mask_filenames) == 0 or (len(mask_filenames) == len(image_filenames)), """
         Different number of image and mask filenames.
         You should check that mask_path is specified for every frame (or zero frames) in transforms.json.
@@ -252,6 +264,7 @@ class Nerfstudio(DataParser):
         image_filenames = [image_filenames[i] for i in indices]
         mask_filenames = [mask_filenames[i] for i in indices] if len(mask_filenames) > 0 else []
         depth_filenames = [depth_filenames[i] for i in indices] if len(depth_filenames) > 0 else []
+        semantic_filenames = [semantic_filenames[i] for i in indices] if len(semantic_filenames) > 0 else []
 
         idx_tensor = torch.tensor(indices, dtype=torch.long)
         poses = poses[idx_tensor]
@@ -403,6 +416,18 @@ class Nerfstudio(DataParser):
                     metadata.update(sparse_points)
             self.prompted_user = True
 
+        # 处理语义标注
+        semantics = None
+        if self.config.include_semantics and len(semantic_filenames) > 0:
+            if "semantic_classes" in meta and "semantic_colors" in meta:
+                classes = meta["semantic_classes"] 
+                colors = torch.tensor(meta["semantic_colors"], dtype=torch.float32) / 255.0
+                semantics = Semantics(
+                    filenames=semantic_filenames,
+                    classes=classes,
+                    colors=colors,
+                )
+
         dataparser_outputs = DataparserOutputs(
             image_filenames=image_filenames,
             cameras=cameras,
@@ -414,6 +439,7 @@ class Nerfstudio(DataParser):
                 "depth_filenames": depth_filenames if len(depth_filenames) > 0 else None,
                 "depth_unit_scale_factor": self.config.depth_unit_scale_factor,
                 "mask_color": self.config.mask_color,
+                "semantics": semantics if self.config.include_semantics else None,
                 **metadata,
             },
         )

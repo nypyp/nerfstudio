@@ -32,7 +32,14 @@ from nerfstudio.field_components.field_heads import FieldHeadNames
 from nerfstudio.field_components.spatial_distortions import SceneContraction
 from nerfstudio.fields.density_fields import HashMLPDensityField
 from nerfstudio.fields.nerfacto_field import NerfactoField
-from nerfstudio.model_components.losses import MSELoss, distortion_loss, interlevel_loss
+from nerfstudio.model_components.losses import (
+    MSELoss,
+    DepthLossType,
+    depth_loss,
+    depth_ranking_loss,
+    distortion_loss,
+    interlevel_loss,
+)
 from nerfstudio.model_components.ray_samplers import ProposalNetworkSampler
 from nerfstudio.model_components.renderers import (
     AccumulationRenderer,
@@ -56,6 +63,22 @@ class SemanticNerfWModelConfig(NerfactoModelConfig):
     """Whether to use transient embedding."""
     semantic_loss_weight: float = 0.04
     pass_semantic_gradients: bool = True
+
+    # Added depth supervision parameters
+    depth_loss_mult: float = 1e-3
+    """Lambda of the depth loss."""
+    is_euclidean_depth: bool = False
+    """Whether input depth maps are Euclidean distances (or z-distances)."""
+    depth_sigma: float = 0.01
+    """Uncertainty around depth values in meters (defaults to 1cm)."""
+    should_decay_sigma: bool = False
+    """Whether to exponentially decay sigma."""
+    starting_depth_sigma: float = 0.2
+    """Starting uncertainty around depth values in meters (defaults to 0.2m)."""
+    sigma_decay_rate: float = 0.99985
+    """Rate of exponential decay."""
+    depth_loss_type: DepthLossType = DepthLossType.DS_NERF
+    """Depth loss type."""
 
 
 class SemanticNerfWModel(Model):
@@ -81,6 +104,12 @@ class SemanticNerfWModel(Model):
 
         if self.config.use_transient_embedding:
             raise ValueError("Transient embedding is not fully working for semantic nerf-w.")
+
+        # Add depth sigma parameter
+        if self.config.should_decay_sigma:
+            self.depth_sigma = torch.tensor([self.config.starting_depth_sigma])
+        else:
+            self.depth_sigma = torch.tensor([self.config.depth_sigma])
 
         # Fields
         self.field = NerfactoField(
@@ -207,6 +236,10 @@ class SemanticNerfWModel(Model):
         outputs["weights_list"] = weights_list
         outputs["ray_samples_list"] = ray_samples_list
 
+        # Add directions_norm to outputs for depth loss calculation
+        if ray_bundle.metadata is not None and "directions_norm" in ray_bundle.metadata:
+            outputs["directions_norm"] = ray_bundle.metadata["directions_norm"]
+
         for i in range(self.config.num_proposal_iterations):
             outputs[f"prop_depth_{i}"] = self.renderer_depth(weights=weights_list[i], ray_samples=ray_samples_list[i])
 
@@ -237,6 +270,36 @@ class SemanticNerfWModel(Model):
         image = self.renderer_rgb.blend_background(image)
         metrics_dict["psnr"] = self.psnr(outputs["rgb"], image)
         metrics_dict["distortion"] = distortion_loss(outputs["weights_list"], outputs["ray_samples_list"])
+
+        # Add depth loss metrics
+        if self.training and "depth_image" in batch:
+            if self.config.depth_loss_type in (DepthLossType.DS_NERF, DepthLossType.URF):
+                metrics_dict["depth_loss"] = 0.0
+                sigma = self._get_sigma().to(self.device)
+                termination_depth = batch["depth_image"].to(self.device)
+                
+                # Get directions norm and ensure correct shape
+                directions_norm = outputs.get("directions_norm", None)
+                if directions_norm is not None and not self.config.is_euclidean_depth:
+                    if directions_norm.shape != termination_depth.shape:
+                        directions_norm = directions_norm.view_as(termination_depth)
+                
+                for i in range(len(outputs["weights_list"])):
+                    metrics_dict["depth_loss"] += depth_loss(
+                        weights=outputs["weights_list"][i],
+                        ray_samples=outputs["ray_samples_list"][i],
+                        termination_depth=termination_depth,
+                        predicted_depth=outputs["depth"],
+                        sigma=sigma,
+                        directions_norm=directions_norm,
+                        is_euclidean=self.config.is_euclidean_depth,
+                        depth_loss_type=self.config.depth_loss_type,
+                    ) / len(outputs["weights_list"])
+            elif self.config.depth_loss_type in (DepthLossType.SPARSENERF_RANKING,):
+                metrics_dict["depth_ranking"] = depth_ranking_loss(
+                    outputs["depth"], batch["depth_image"].to(self.device)
+                )
+
         return metrics_dict
 
     def get_loss_dict(self, outputs, batch, metrics_dict=None):
@@ -262,6 +325,19 @@ class SemanticNerfWModel(Model):
         loss_dict["semantics_loss"] = self.config.semantic_loss_weight * self.cross_entropy_loss(
             outputs["semantics"], batch["semantics"][..., 0].long().to(self.device)
         )
+
+        # Add depth loss
+        if self.training and "depth_image" in batch:
+            assert metrics_dict is not None
+            if "depth_ranking" in metrics_dict:
+                loss_dict["depth_ranking"] = (
+                    self.config.depth_loss_mult
+                    * np.interp(self.step, [0, 2000], [0, 0.2])
+                    * metrics_dict["depth_ranking"]
+                )
+            if "depth_loss" in metrics_dict:
+                loss_dict["depth_loss"] = self.config.depth_loss_mult * metrics_dict["depth_loss"]
+
         return loss_dict
 
     def get_image_metrics_and_images(
@@ -315,4 +391,35 @@ class SemanticNerfWModel(Model):
         # valid mask
         images_dict["mask"] = batch["mask"].repeat(1, 1, 3).to(self.device)
 
+        # Add depth visualization and metrics
+        if "depth_image" in batch:
+            ground_truth_depth = batch["depth_image"].to(self.device)
+            if not self.config.is_euclidean_depth and "directions_norm" in outputs:
+                ground_truth_depth = ground_truth_depth * outputs["directions_norm"]
+
+            ground_truth_depth_colormap = colormaps.apply_depth_colormap(ground_truth_depth)
+            predicted_depth_colormap = colormaps.apply_depth_colormap(
+                outputs["depth"],
+                accumulation=outputs["accumulation"],
+                near_plane=float(torch.min(ground_truth_depth).cpu()),
+                far_plane=float(torch.max(ground_truth_depth).cpu()),
+            )
+            images_dict["depth"] = torch.cat([ground_truth_depth_colormap, predicted_depth_colormap], dim=1)
+
+            # Add depth metrics
+            depth_mask = ground_truth_depth > 0
+            metrics_dict["depth_mse"] = float(
+                torch.nn.functional.mse_loss(outputs["depth"][depth_mask], ground_truth_depth[depth_mask]).cpu()
+            )
+
         return metrics_dict, images_dict
+
+    def _get_sigma(self):
+        """Helper function to get sigma value for depth loss."""
+        if not self.config.should_decay_sigma:
+            return self.depth_sigma
+
+        self.depth_sigma = torch.maximum(
+            self.config.sigma_decay_rate * self.depth_sigma, torch.tensor([self.config.depth_sigma])
+        )
+        return self.depth_sigma

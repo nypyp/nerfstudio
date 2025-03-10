@@ -97,7 +97,7 @@
         "--vis",
         "viewer+tensorboard",
         "--data",
-        "data/replica_colmap/room_1"
+        "data/replica_colmap/colmap_output"
       ]
     },
     {

@@ -16,23 +16,30 @@
 Semantic dataset.
 """
 
-from typing import Dict
+import json
+from pathlib import Path
+from typing import Dict, Union
 
+import numpy as np
 import torch
+from PIL import Image
+from rich.progress import track
 
 from nerfstudio.data.dataparsers.base_dataparser import DataparserOutputs, Semantics
-from nerfstudio.data.datasets.base_dataset import InputDataset
-from nerfstudio.data.utils.data_utils import get_semantics_and_mask_tensors_from_path
+from nerfstudio.data.datasets.depth_dataset import DepthDataset
+from nerfstudio.data.utils.data_utils import get_depth_image_from_path, get_semantics_and_mask_tensors_from_path
+from nerfstudio.model_components import losses
+from nerfstudio.utils.rich_utils import CONSOLE
 
 
-class SemanticDataset(InputDataset):
-    """Dataset that returns images and semantics and masks.
+class SemanticDataset(DepthDataset):
+    """Dataset that returns images, semantics, masks and depths.
 
     Args:
         dataparser_outputs: description of where and how to read input images.
     """
 
-    exclude_batch_keys_from_device = InputDataset.exclude_batch_keys_from_device + ["mask", "semantics"]
+    exclude_batch_keys_from_device = DepthDataset.exclude_batch_keys_from_device + ["mask", "semantics"]
 
     def __init__(self, dataparser_outputs: DataparserOutputs, scale_factor: float = 1.0):
         super().__init__(dataparser_outputs, scale_factor)
@@ -43,11 +50,19 @@ class SemanticDataset(InputDataset):
         ).view(1, 1, -1)
 
     def get_metadata(self, data: Dict) -> Dict:
-        # handle mask
+        metadata = super().get_metadata(data)  # Get depth data from parent class
+        
+        # Add semantic data
         filepath = self.semantics.filenames[data["image_idx"]]
         semantic_label, mask = get_semantics_and_mask_tensors_from_path(
             filepath=filepath, mask_indices=self.mask_indices, scale_factor=self.scale_factor
         )
         if "mask" in data.keys():
             mask = mask & data["mask"]
-        return {"mask": mask, "semantics": semantic_label}
+            
+        metadata.update({
+            "mask": mask,
+            "semantics": semantic_label
+        })
+        
+        return metadata
