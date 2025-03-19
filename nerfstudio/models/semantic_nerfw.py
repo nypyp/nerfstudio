@@ -411,6 +411,8 @@ class SemanticNerfWModel(Model):
             metrics_dict["depth_mse"] = float(
                 torch.nn.functional.mse_loss(outputs["depth"][depth_mask], ground_truth_depth[depth_mask]).cpu()
             )
+            depth_l1 = torch.mean(torch.abs(outputs["depth"][depth_mask] - ground_truth_depth[depth_mask]))
+            metrics_dict["depth_L1"] = float(depth_l1.cpu())
 
         return metrics_dict, images_dict
 

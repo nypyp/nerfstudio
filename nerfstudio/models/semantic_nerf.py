@@ -1,6 +1,6 @@
 
 from dataclasses import dataclass, field
-from typing import  Any, Dict, Type, Tuple, Literal
+from typing import  Any, Dict, Type, Tuple, Literal, List
 
 import torch
 from torch.nn import Parameter
@@ -138,7 +138,7 @@ class SemanticNerfModel(Model):
             kind = params.pop("kind")
             self.temporal_distortion = kind.to_temporal_distortion(params)
             
-    def get_param_groups(self) -> Dict[str, torch.List[Parameter]]:
+    def get_param_groups(self) -> Dict[str, List[Parameter]]:
         param_groups = {}
         if self.field_coarse is None or self.field_fine is None:
             raise ValueError("populate_fields() must be called before get_param_groups")
