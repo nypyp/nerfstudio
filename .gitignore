@@ -225,3 +225,4 @@ trans2cam_new.py
 mapper
 evals
 crossEnto.py
+statics.py

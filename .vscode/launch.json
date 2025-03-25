@@ -95,9 +95,9 @@
       "args": [
         "semantic-nerfw",
         "--vis",
-        "viewer+tensorboard",
+        "viewer+wandb",
         "--data",
-        "data/replica_colmap/colmap_output"
+        "/home/nypyp/code/data/Replica/Replica_Dataset_colmap/room_0/Sequence_1/colmap_output/"
       ]
     },
     {

@@ -18,6 +18,7 @@ Semantic NeRF-W implementation which should be fast enough to view in the viewer
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Dict, List, Tuple, Type
 
@@ -27,27 +28,22 @@ from torch.nn import Parameter
 
 from nerfstudio.cameras.rays import RayBundle
 from nerfstudio.data.dataparsers.base_dataparser import Semantics
-from nerfstudio.engine.callbacks import TrainingCallback, TrainingCallbackAttributes, TrainingCallbackLocation
+from nerfstudio.engine.callbacks import (TrainingCallback,
+                                         TrainingCallbackAttributes,
+                                         TrainingCallbackLocation)
 from nerfstudio.field_components.field_heads import FieldHeadNames
 from nerfstudio.field_components.spatial_distortions import SceneContraction
 from nerfstudio.fields.density_fields import HashMLPDensityField
 from nerfstudio.fields.nerfacto_field import NerfactoField
-from nerfstudio.model_components.losses import (
-    MSELoss,
-    DepthLossType,
-    depth_loss,
-    depth_ranking_loss,
-    distortion_loss,
-    interlevel_loss,
-)
+from nerfstudio.model_components.losses import (DepthLossType, MSELoss,
+                                                depth_loss, depth_ranking_loss,
+                                                distortion_loss,
+                                                interlevel_loss)
 from nerfstudio.model_components.ray_samplers import ProposalNetworkSampler
-from nerfstudio.model_components.renderers import (
-    AccumulationRenderer,
-    DepthRenderer,
-    RGBRenderer,
-    SemanticRenderer,
-    UncertaintyRenderer,
-)
+from nerfstudio.model_components.renderers import (AccumulationRenderer,
+                                                   DepthRenderer, RGBRenderer,
+                                                   SemanticRenderer,
+                                                   UncertaintyRenderer)
 from nerfstudio.model_components.scene_colliders import NearFarCollider
 from nerfstudio.models.base_model import Model
 from nerfstudio.models.nerfacto import NerfactoModelConfig
@@ -61,8 +57,10 @@ class SemanticNerfWModelConfig(NerfactoModelConfig):
     _target: Type = field(default_factory=lambda: SemanticNerfWModel)
     use_transient_embedding: bool = False
     """Whether to use transient embedding."""
-    semantic_loss_weight: float = 0.04
+    semantic_loss_weight: float = 0.001
     pass_semantic_gradients: bool = True
+    use_semantic_probability: bool = True
+    """Whether to use semantic probability."""
 
     # Added depth supervision parameters
     depth_loss_mult: float = 1e-3
@@ -125,6 +123,10 @@ class SemanticNerfWModel(Model):
             num_semantic_classes=len(self.semantics.classes),
             pass_semantic_gradients=self.config.pass_semantic_gradients,
         )
+        if self.config.use_semantic_probability:
+            self.out_activation = torch.nn.Softmax(dim=-1)
+        else:
+            self.out_activation = torch.nn.Identity()
 
         # Build the proposal network(s)
         self.proposal_networks = torch.nn.ModuleList()
@@ -161,13 +163,20 @@ class SemanticNerfWModel(Model):
         self.cross_entropy_loss = torch.nn.CrossEntropyLoss(reduction="mean")
 
         # metrics
+        from torchmetrics.classification import (MulticlassAccuracy,
+                                                 MulticlassJaccardIndex)
         from torchmetrics.functional import structural_similarity_index_measure
         from torchmetrics.image import PeakSignalNoiseRatio
-        from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
+        from torchmetrics.image.lpip import \
+            LearnedPerceptualImagePatchSimilarity
 
         self.psnr = PeakSignalNoiseRatio(data_range=1.0)
         self.ssim = structural_similarity_index_measure
         self.lpips = LearnedPerceptualImagePatchSimilarity(normalize=True)
+        
+        self.num_classes = len(self.semantics.classes)
+        self.mIoU = MulticlassJaccardIndex(num_classes=self.num_classes, average="macro")
+        self.pixel_accuracy = MulticlassAccuracy(num_classes=self.num_classes, average="micro")
 
     def get_param_groups(self) -> Dict[str, List[Parameter]]:
         param_groups = {}
@@ -254,12 +263,37 @@ class SemanticNerfWModel(Model):
         semantic_weights = weights_static
         if not self.config.pass_semantic_gradients:
             semantic_weights = semantic_weights.detach()
+        # filed_outputs_actived: [4096, 48, 32]
+        # assert torch.isfinite(field_outputs[FieldHeadNames.SEMANTICS]).all(), "Field outputs contain NaN/inf"
+        field_outputs_actived = self.out_activation(field_outputs[FieldHeadNames.SEMANTICS])
+        # assert (field_outputs_actived >= 0).all(), "field_outputs_actived contains negative values"
+        # assert (field_outputs_actived <= 1.0 + 1e-6).all(), "field_outputs_actived exceeds 1.0"
+        # sums = field_outputs_actived.sum(dim=-1)
+        # assert torch.allclose(sums, torch.ones_like(sums), atol=1e-5), "Sum of probabilities not close to 1"
+        # assert torch.isfinite(field_outputs_actived).all(), "Field outputs contain NaN/inf"
         outputs["semantics"] = self.renderer_semantics(
-            field_outputs[FieldHeadNames.SEMANTICS], weights=semantic_weights
+            field_outputs_actived, weights=semantic_weights
         )
-
+        # assert (outputs["semantics"] >= 0).all(), "Renderer output contains negative values"
+        # assert (outputs["semantics"] <= 1.0 + 1e-6).all(), "Renderer output exceeds 1.0"
+        
+        
+        
+        if self.config.use_semantic_probability:
+            semantic_map = outputs["semantics"]
+            semantic_map = semantic_map / (semantic_map.sum(-1).unsqueeze(-1) + 1e-8)
+            # assert torch.allclose(semantic_map.sum(dim=-1), torch.ones_like(semantic_map.sum(dim=-1)), atol=1e-5), "手动归一化后总和不为 1"
+            semantic_map = torch.log(semantic_map + 1e-8)
+            # assert torch.isfinite(semantic_map).all(), "Semantic probabilities contain NaN/inf"
+            outputs["semantics"] = semantic_map
+            # outputs["semantics"] = torch.nn.functional.log_softmax(outputs["semantics"], dim=-1)
+            
+        
         # semantics colormaps outputs[semantics_colormap]: [4096, 3]
-        semantic_labels = torch.argmax(torch.nn.functional.softmax(outputs["semantics"], dim=-1), dim=-1)
+        if self.config.use_semantic_probability:
+            semantic_labels = torch.argmax(torch.exp(outputs["semantics"]), dim=-1)
+        else:
+            semantic_labels = torch.argmax(torch.nn.functional.softmax(outputs["semantics"], dim=-1), dim=-1)
         outputs["semantics_colormap"] = self.colormap.to(self.device)[semantic_labels]
 
         return outputs
@@ -321,10 +355,32 @@ class SemanticNerfWModel(Model):
         else:
             loss_dict["rgb_loss"] = self.rgb_loss(image, outputs["rgb"])
 
+        
         # semantic loss
-        loss_dict["semantics_loss"] = self.config.semantic_loss_weight * self.cross_entropy_loss(
-            outputs["semantics"], batch["semantics"][..., 0].long().to(self.device)
-        )
+        if self.config.use_semantic_probability:
+            # assert torch.isfinite(outputs["semantics"]).all(), "Semantics tensor contains NaN/inf"
+            # assert torch.isfinite(batch["semantics"][..., 0].long().to(self.device)).all(), "Semantic targets contain invalid values"
+            # probabilities = torch.exp(outputs["semantics"])
+            # confidence = probabilities.max(dim=-1)[0]
+            # entropy = -torch.sum(probabilities * torch.log2(probabilities + 1e-8), dim=-1)
+            # entropy_normalized = entropy / math.log2(probabilities.shape[-1])
+            # weight = torch.where(
+            #     entropy_normalized > 0.4,
+            #     torch.ones_like(entropy_normalized),
+            #     confidence
+            # )
+            loss_dict["semantics_loss"] = self.config.semantic_loss_weight * torch.nn.NLLLoss()(
+                outputs["semantics"], 
+                batch["semantics"][..., 0].long().to(self.device)
+            )
+        else:
+            # loss_dict["semantics_loss"] = self.config.semantic_loss_weight * (self.cross_entropy_loss(
+            #     outputs["semantics"], batch["semantics"][..., 0].long().to(self.device)
+            # ) * weights).mean()
+            loss_dict["semantics_loss"] = self.config.semantic_loss_weight * self.cross_entropy_loss(
+                outputs["semantics"], batch["semantics"][..., 0].long().to(self.device)
+            )
+        assert not torch.isnan(loss_dict["semantics_loss"]), "Semantic loss contains NaN values"
 
         # Add depth loss
         if self.training and "depth_image" in batch:
@@ -385,11 +441,56 @@ class SemanticNerfWModel(Model):
             images_dict[key] = prop_depth_i
 
         # semantics
-        semantic_labels = torch.argmax(torch.nn.functional.softmax(outputs["semantics"], dim=-1), dim=-1)
-        images_dict["semantics_colormap"] = self.colormap.to(self.device)[semantic_labels]
+        if self.config.use_semantic_probability:
+            semantic_labels = torch.argmax(outputs["semantics"], dim=-1)
+        else:
+            semantic_labels = torch.argmax(torch.nn.functional.softmax(outputs["semantics"], dim=-1), dim=-1)
+        semantic_colormap = self.colormap.to(self.device)[semantic_labels]
+        # gt label
+        gt_label = batch["semantics"][..., 0].long().to(self.device)
+        gt_colormap = self.colormap.to(self.device)[gt_label]
+        # 调整维度：从 [B, H, W] → [H, W, 1]
+        semantic_labels = semantic_labels.squeeze(0)  # 移除 batch 维度（假设 B=1）
+        semantic_labels = semantic_labels.unsqueeze(2).to(torch.uint8)
 
+        # confidence and entropy
+        if self.config.use_semantic_probability:
+            probabilities = torch.exp(outputs["semantics"])
+        else:
+            probabilities = torch.softmax(outputs["semantics"], dim=-1)
+        # confidence
+        confidence = probabilities.max(dim=-1)[0]
+        semantics_confidence = colormaps.apply_float_colormap(
+            confidence.unsqueeze(-1),
+            colormap="viridis"
+        )
+        # entropy
+        entropy = -torch.sum(probabilities * torch.log2(probabilities + 1e-8), dim=-1)
+        num_classes = probabilities.shape[-1]
+        entropy /= math.log2(num_classes)
+        semantics_entrophymap = colormaps.apply_float_colormap(
+            entropy.unsqueeze(-1),
+            colormap="viridis"
+        )
+        
+        self.mIoU.reset()
+        self.pixel_accuracy.reset()
+        
+        self.mIoU.update(semantic_labels.flatten(), gt_label.flatten())
+        self.pixel_accuracy.update(semantic_labels.flatten(), gt_label.flatten())
+        
+        
+        metrics_dict["mIoU"] = self.mIoU.compute().item()
+        metrics_dict["pixel_acc"] = self.pixel_accuracy.compute().item()
+        
+        # conbined
+        images_dict["semantics_colormaps_gt"] = torch.cat([gt_colormap, semantic_colormap], dim=1)
+        images_dict["semantics_colormaps"] = torch.cat([semantic_colormap, semantics_confidence, semantics_entrophymap], dim=1)
+        images_dict["semantics_labels"] = semantic_labels
+        
+        
         # valid mask
-        images_dict["mask"] = batch["mask"].repeat(1, 1, 3).to(self.device)
+        # images_dict["mask"] = batch["mask"].repeat(1, 1, 3).to(self.device)
 
         # Add depth visualization and metrics
         if "depth_image" in batch:

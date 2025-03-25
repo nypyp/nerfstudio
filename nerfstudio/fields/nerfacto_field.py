@@ -26,14 +26,12 @@ from nerfstudio.data.scene_box import SceneBox
 from nerfstudio.field_components.activations import trunc_exp
 from nerfstudio.field_components.embedding import Embedding
 from nerfstudio.field_components.encodings import NeRFEncoding, SHEncoding
-from nerfstudio.field_components.field_heads import (
-    FieldHeadNames,
-    PredNormalsFieldHead,
-    SemanticFieldHead,
-    TransientDensityFieldHead,
-    TransientRGBFieldHead,
-    UncertaintyFieldHead,
-)
+from nerfstudio.field_components.field_heads import (FieldHeadNames,
+                                                     PredNormalsFieldHead,
+                                                     SemanticFieldHead,
+                                                     TransientDensityFieldHead,
+                                                     TransientRGBFieldHead,
+                                                     UncertaintyFieldHead)
 from nerfstudio.field_components.mlp import MLP, MLPWithHashEncoding
 from nerfstudio.field_components.spatial_distortions import SpatialDistortion
 from nerfstudio.fields.base_field import Field, get_normalized_directions

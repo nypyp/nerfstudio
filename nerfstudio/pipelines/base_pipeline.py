@@ -387,9 +387,15 @@ class VanillaPipeline(Pipeline):
                 if output_path is not None:
                     for key in image_dict.keys():
                         image = image_dict[key]  # [H, W, C] order
-                        vutils.save_image(
-                            image.permute(2, 0, 1).cpu(), output_path / f"{image_prefix}_{key}_{idx:04d}.png"
-                        )
+                        if key == "semantics_labels":
+                            from PIL import Image
+                            import numpy as np
+                            label_array = image.squeeze().cpu().numpy().astype(np.uint8)
+                            Image.fromarray(label_array).save(output_path /  f"{image_prefix}_{key}_{idx:04d}.png", format="PNG")
+                        else:
+                            vutils.save_image(
+                                image.permute(2, 0, 1).cpu(), output_path / f"{image_prefix}_{key}_{idx:04d}.png"
+                            )
 
                 assert "num_rays_per_sec" not in metrics_dict
                 metrics_dict["num_rays_per_sec"] = (num_rays / (time() - inner_start)).item()
