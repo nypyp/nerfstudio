@@ -226,3 +226,12 @@ mapper
 evals
 crossEnto.py
 statics.py
+comp_sannet_300.tar.gz
+depth_check.py
+get_indice.py
+get_miou.py
+label_vis.png
+image.png
+rename_eval_labels.py
+vis_labels_scannet.py
+vis_labels.py

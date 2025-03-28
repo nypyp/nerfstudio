@@ -57,9 +57,9 @@ class SemanticNerfWModelConfig(NerfactoModelConfig):
     _target: Type = field(default_factory=lambda: SemanticNerfWModel)
     use_transient_embedding: bool = False
     """Whether to use transient embedding."""
-    semantic_loss_weight: float = 0.001
+    semantic_loss_weight: float = 0.04
     pass_semantic_gradients: bool = True
-    use_semantic_probability: bool = True
+    use_semantic_probability: bool = False
     """Whether to use semantic probability."""
 
     # Added depth supervision parameters
