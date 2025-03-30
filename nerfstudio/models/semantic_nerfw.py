@@ -35,7 +35,7 @@ from nerfstudio.field_components.field_heads import FieldHeadNames
 from nerfstudio.field_components.spatial_distortions import SceneContraction
 from nerfstudio.fields.density_fields import HashMLPDensityField
 from nerfstudio.fields.nerfacto_field import NerfactoField
-from nerfstudio.model_components.losses import (DepthLossType, MSELoss,
+from nerfstudio.model_components.losses import (DepthLossType, MSELoss, SemanticS3IM,
                                                 depth_loss, depth_ranking_loss,
                                                 distortion_loss,
                                                 interlevel_loss)
@@ -57,9 +57,9 @@ class SemanticNerfWModelConfig(NerfactoModelConfig):
     _target: Type = field(default_factory=lambda: SemanticNerfWModel)
     use_transient_embedding: bool = False
     """Whether to use transient embedding."""
-    semantic_loss_weight: float = 0.04
+    semantic_loss_weight: float = 0.01
     pass_semantic_gradients: bool = True
-    use_semantic_probability: bool = False
+    use_semantic_probability: bool = True
     """Whether to use semantic probability."""
 
     # Added depth supervision parameters
@@ -259,37 +259,20 @@ class SemanticNerfWModel(Model):
             outputs["uncertainty"] = uncertainty + 0.03  # NOTE(ethan): this is the uncertainty min
             outputs["density_transient"] = field_outputs[FieldHeadNames.TRANSIENT_DENSITY]
 
-        # semantics outpus[semantics]: [4096, 144]
         semantic_weights = weights_static
         if not self.config.pass_semantic_gradients:
             semantic_weights = semantic_weights.detach()
-        # filed_outputs_actived: [4096, 48, 32]
-        # assert torch.isfinite(field_outputs[FieldHeadNames.SEMANTICS]).all(), "Field outputs contain NaN/inf"
         field_outputs_actived = self.out_activation(field_outputs[FieldHeadNames.SEMANTICS])
-        # assert (field_outputs_actived >= 0).all(), "field_outputs_actived contains negative values"
-        # assert (field_outputs_actived <= 1.0 + 1e-6).all(), "field_outputs_actived exceeds 1.0"
-        # sums = field_outputs_actived.sum(dim=-1)
-        # assert torch.allclose(sums, torch.ones_like(sums), atol=1e-5), "Sum of probabilities not close to 1"
-        # assert torch.isfinite(field_outputs_actived).all(), "Field outputs contain NaN/inf"
         outputs["semantics"] = self.renderer_semantics(
             field_outputs_actived, weights=semantic_weights
         )
-        # assert (outputs["semantics"] >= 0).all(), "Renderer output contains negative values"
-        # assert (outputs["semantics"] <= 1.0 + 1e-6).all(), "Renderer output exceeds 1.0"
-        
-        
         
         if self.config.use_semantic_probability:
             semantic_map = outputs["semantics"]
             semantic_map = semantic_map / (semantic_map.sum(-1).unsqueeze(-1) + 1e-8)
-            # assert torch.allclose(semantic_map.sum(dim=-1), torch.ones_like(semantic_map.sum(dim=-1)), atol=1e-5), "手动归一化后总和不为 1"
             semantic_map = torch.log(semantic_map + 1e-8)
-            # assert torch.isfinite(semantic_map).all(), "Semantic probabilities contain NaN/inf"
             outputs["semantics"] = semantic_map
-            # outputs["semantics"] = torch.nn.functional.log_softmax(outputs["semantics"], dim=-1)
             
-        
-        # semantics colormaps outputs[semantics_colormap]: [4096, 3]
         if self.config.use_semantic_probability:
             semantic_labels = torch.argmax(torch.exp(outputs["semantics"]), dim=-1)
         else:
@@ -355,32 +338,19 @@ class SemanticNerfWModel(Model):
         else:
             loss_dict["rgb_loss"] = self.rgb_loss(image, outputs["rgb"])
 
+        ce_loss = self.cross_entropy_loss(
+            outputs["semantics"], 
+            batch["semantics"][..., 0].long().to(self.device)
+        )
+        
+        # ss3im_loss = SemanticS3IM()(
+        #     outputs["semantics"], 
+        #     batch["semantics"][..., 0].long().to(self.device)
+        # )
         
         # semantic loss
-        if self.config.use_semantic_probability:
-            # assert torch.isfinite(outputs["semantics"]).all(), "Semantics tensor contains NaN/inf"
-            # assert torch.isfinite(batch["semantics"][..., 0].long().to(self.device)).all(), "Semantic targets contain invalid values"
-            # probabilities = torch.exp(outputs["semantics"])
-            # confidence = probabilities.max(dim=-1)[0]
-            # entropy = -torch.sum(probabilities * torch.log2(probabilities + 1e-8), dim=-1)
-            # entropy_normalized = entropy / math.log2(probabilities.shape[-1])
-            # weight = torch.where(
-            #     entropy_normalized > 0.4,
-            #     torch.ones_like(entropy_normalized),
-            #     confidence
-            # )
-            loss_dict["semantics_loss"] = self.config.semantic_loss_weight * torch.nn.NLLLoss()(
-                outputs["semantics"], 
-                batch["semantics"][..., 0].long().to(self.device)
-            )
-        else:
-            # loss_dict["semantics_loss"] = self.config.semantic_loss_weight * (self.cross_entropy_loss(
-            #     outputs["semantics"], batch["semantics"][..., 0].long().to(self.device)
-            # ) * weights).mean()
-            loss_dict["semantics_loss"] = self.config.semantic_loss_weight * self.cross_entropy_loss(
-                outputs["semantics"], batch["semantics"][..., 0].long().to(self.device)
-            )
-        assert not torch.isnan(loss_dict["semantics_loss"]), "Semantic loss contains NaN values"
+        loss_dict["semantics_loss"] = self.config.semantic_loss_weight * ce_loss
+
 
         # Add depth loss
         if self.training and "depth_image" in batch:
@@ -502,8 +472,8 @@ class SemanticNerfWModel(Model):
             predicted_depth_colormap = colormaps.apply_depth_colormap(
                 outputs["depth"],
                 accumulation=outputs["accumulation"],
-                near_plane=float(torch.min(ground_truth_depth).cpu()),
-                far_plane=float(torch.max(ground_truth_depth).cpu()),
+                # near_plane=float(torch.min(ground_truth_depth).cpu()),
+                # far_plane=float(torch.max(ground_truth_depth).cpu()),
             )
             images_dict["depth"] = torch.cat([ground_truth_depth_colormap, predicted_depth_colormap], dim=1)
 

@@ -584,3 +584,60 @@ def depth_ranking_loss(rendered_depth, gt_depth):
     out_diff = rendered_depth[::2, :] - rendered_depth[1::2, :] + m
     differing_signs = torch.sign(dpt_diff) != torch.sign(out_diff)
     return torch.nanmean((out_diff[differing_signs] * torch.sign(out_diff[differing_signs])))
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+class SemanticSimilarity(nn.Module):
+    def __init__(self, metric_type='kl'):
+        super().__init__()
+        self.metric_type = metric_type
+        
+    def forward(self, pred, target):
+        """
+        pred/target: [B, H, W, C] 语义概率分布
+        """
+        # 转换为对数空间
+        # log_pred = torch.log(pred + 1e-8)
+        
+        if self.metric_type == 'kl':
+            # KL散度度量分布差异
+            return F.kl_div(pred, target, reduction='batchmean')
+        elif self.metric_type == 'cosine':
+            # 余弦相似性
+            return 1 - F.cosine_similarity(pred, target, dim=0).mean()
+        elif self.metric_type == 'ce':
+            # 交叉熵损失
+            return F.cross_entropy(pred.view(-1, pred.size(-1)), 
+                                 target.argmax(-1).view(-1))
+        else:
+            raise ValueError("Unsupported metric type")
+
+class SemanticS3IM(nn.Module):
+    def __init__(self, repeat_time=3, patch_size=32, metric='kl'):
+        super().__init__()
+        self.similarity = SemanticSimilarity(metric)
+        self.repeat_time = repeat_time
+        self.patch_size = patch_size
+
+    def forward(self, sem_pred, sem_gt):
+        """
+        sem_pred/sem_gt: [N, C] 语义概率分布
+        """
+        
+        N, C = sem_pred.shape
+        
+        sem_gt = F.one_hot(sem_gt.long(), num_classes=C).float()
+        
+        total_loss = 0
+        for _ in range(self.repeat_time):
+            # 随机打乱生成虚拟块
+            idx = torch.randperm(N)[:self.patch_size**2]
+            pred_patch = sem_pred[idx].view(self.patch_size, self.patch_size, C)
+            gt_patch = sem_gt[idx].view(self.patch_size, self.patch_size, C)
+            
+            # 计算块间相似性损失
+            total_loss += self.similarity(pred_patch, gt_patch)
+            
+        return total_loss / self.repeat_time
