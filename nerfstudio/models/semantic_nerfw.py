@@ -35,8 +35,9 @@ from nerfstudio.field_components.field_heads import FieldHeadNames
 from nerfstudio.field_components.spatial_distortions import SceneContraction
 from nerfstudio.fields.density_fields import HashMLPDensityField
 from nerfstudio.fields.nerfacto_field import NerfactoField
-from nerfstudio.model_components.losses import (DepthLossType, MSELoss, SemanticS3IM,
-                                                depth_loss, depth_ranking_loss,
+from nerfstudio.model_components.losses import (DepthLossType, MSELoss,
+                                                SemanticS3IM, depth_loss,
+                                                depth_ranking_loss,
                                                 distortion_loss,
                                                 interlevel_loss)
 from nerfstudio.model_components.ray_samplers import ProposalNetworkSampler
@@ -354,7 +355,7 @@ class SemanticNerfWModel(Model):
             loss_dict["consis_loss"] = consistance_loss
         
         # semantic loss
-        loss_dict["semantics_loss"] = self.config.semantic_loss_weight * semantics_loss
+        loss_dict["semantics_loss"] = self.config.semantic_loss_weight * ce_loss
 
         # Add depth loss
         if self.training and "depth_image" in batch:

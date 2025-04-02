@@ -164,8 +164,8 @@ class NerfactoField(Field):
         if self.use_semantics:
             self.mlp_semantics = MLP(
                 in_dim=self.geo_feat_dim,
-                num_layers=5,
-                layer_width=128,
+                num_layers=2,
+                layer_width=64,
                 out_dim=hidden_dim_transient,
                 activation=nn.ReLU(),
                 out_activation=None,

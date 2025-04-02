@@ -237,3 +237,6 @@ vis_labels_scannet.py
 vis_labels.py
 rotate.py
 semantic_nerfw_secne_0300.tar.gz
+ade20k_to_scannet_v2.csv
+downsample.py
+mapp_scannet.py
