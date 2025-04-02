@@ -235,3 +235,5 @@ image.png
 rename_eval_labels.py
 vis_labels_scannet.py
 vis_labels.py
+rotate.py
+semantic_nerfw_secne_0300.tar.gz

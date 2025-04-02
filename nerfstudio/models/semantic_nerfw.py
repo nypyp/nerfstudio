@@ -57,9 +57,10 @@ class SemanticNerfWModelConfig(NerfactoModelConfig):
     _target: Type = field(default_factory=lambda: SemanticNerfWModel)
     use_transient_embedding: bool = False
     """Whether to use transient embedding."""
-    semantic_loss_weight: float = 0.01
-    pass_semantic_gradients: bool = True
+    semantic_loss_weight: float = 0.1
+    pass_semantic_gradients: bool = False
     use_semantic_probability: bool = True
+    use_consistance_loss: bool = False
     """Whether to use semantic probability."""
 
     # Added depth supervision parameters
@@ -161,6 +162,7 @@ class SemanticNerfWModel(Model):
         # losses
         self.rgb_loss = MSELoss()
         self.cross_entropy_loss = torch.nn.CrossEntropyLoss(reduction="mean")
+        self.consistance_loss = SemanticS3IM()
 
         # metrics
         from torchmetrics.classification import (MulticlassAccuracy,
@@ -338,19 +340,21 @@ class SemanticNerfWModel(Model):
         else:
             loss_dict["rgb_loss"] = self.rgb_loss(image, outputs["rgb"])
 
-        ce_loss = self.cross_entropy_loss(
+        semantics_loss = self.cross_entropy_loss(
             outputs["semantics"], 
             batch["semantics"][..., 0].long().to(self.device)
         )
         
-        # ss3im_loss = SemanticS3IM()(
-        #     outputs["semantics"], 
-        #     batch["semantics"][..., 0].long().to(self.device)
-        # )
+        if self.config.use_consistance_loss:
+            consistance_loss = self.consistance_loss(
+                outputs["semantics"], 
+                batch["semantics"][..., 0].long().to(self.device)
+            )
+            semantics_loss = semantics_loss + consistance_loss * 0.5
+            loss_dict["consis_loss"] = consistance_loss
         
         # semantic loss
-        loss_dict["semantics_loss"] = self.config.semantic_loss_weight * ce_loss
-
+        loss_dict["semantics_loss"] = self.config.semantic_loss_weight * semantics_loss
 
         # Add depth loss
         if self.training and "depth_image" in batch:
